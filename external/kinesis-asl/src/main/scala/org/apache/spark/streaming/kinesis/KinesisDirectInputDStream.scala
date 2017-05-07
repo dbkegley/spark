@@ -17,11 +17,9 @@
 
 package org.apache.spark.streaming.kinesis
 
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 import com.amazonaws.services.kinesis.model.Record
 import org.apache.spark.annotation.InterfaceStability
 import org.apache.spark.internal.Logging
-import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.api.java.JavaStreamingContext
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.dstream.{DStreamCheckpointData, InputDStream}
@@ -245,10 +243,7 @@ object KinesisDirectInputDStream {
     byteArray
   }
 
+  private[kinesis] val DEFAULT_KINESIS_REGION_NAME: String = "us-east-1"
   private[kinesis] val DEFAULT_KINESIS_ENDPOINT_URL: String =
     "https://kinesis.us-east-1.amazonaws.com"
-  private[kinesis] val DEFAULT_KINESIS_REGION_NAME: String = "us-east-1"
-  private[kinesis] val DEFAULT_INITIAL_POSITION_IN_STREAM: InitialPositionInStream =
-    InitialPositionInStream.LATEST
-  private[kinesis] val DEFAULT_STORAGE_LEVEL: StorageLevel = StorageLevel.MEMORY_AND_DISK_2
 }
