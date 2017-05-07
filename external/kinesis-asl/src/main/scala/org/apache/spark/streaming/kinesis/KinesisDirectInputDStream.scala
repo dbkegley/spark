@@ -21,12 +21,12 @@ import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionIn
 import com.amazonaws.services.kinesis.model.Record
 import org.apache.spark.annotation.InterfaceStability
 import org.apache.spark.internal.Logging
-import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.api.java.JavaStreamingContext
 import org.apache.spark.streaming.{StreamingContext, Time}
-import org.apache.spark.streaming.dstream.InputDStream
+import org.apache.spark.streaming.dstream.{DStreamCheckpointData, InputDStream}
 
+import scala.collection.mutable
 import scala.reflect.ClassTag
 
 private[kinesis]
@@ -34,18 +34,63 @@ class KinesisDirectInputDStream[T: ClassTag](_ssc: StreamingContext,
                                              val streamName: String,
                                              val endpointUrl: String,
                                              val regionName: String,
-                                             val initialPositionInStream: InitialPositionInStream,
-                                             val _storageLevel: StorageLevel,
+                                             val fromSeqNumbers: Map[String, String],
                                              val messageHandler: Record => T,
-                                             val kinesisCreds: SparkAWSCredentials,
-                                             val dynamoDBCreds: Option[SparkAWSCredentials],
-                                             val cloudWatchCreds: Option[SparkAWSCredentials]) extends InputDStream[T](_ssc) with Logging {
+                                             val kinesisCreds: SparkAWSCredentials) extends InputDStream[T](_ssc) with Logging {
+
   override def start(): Unit = {}
 
   override def stop(): Unit = {}
 
-  override def compute(validTime: Time): Option[RDD[T]] = {
-    None
+  override def compute(validTime: Time): Option[KinesisRDD[T]] = {
+
+    // todo: describe streams
+
+    // todo: calculate seqNum ranges
+
+//    val seqNumRanges = fromSeqNumbers.map { case (shardId, seqNum) =>
+//        seqNum
+//    }
+    val seqNumRanges = SequenceNumberRanges(Seq(SequenceNumberRange("", "", "", "", 0)))
+
+     val rdd = new KinesisRDD(
+       context.sc,
+       endpointUrl,
+       regionName,
+       seqNumRanges,
+       messageHandler,
+       kinesisCreds)
+
+    Some(rdd)
+  }
+
+  private[streaming]
+  class KinesisDirectInputDStreamCheckpointData extends DStreamCheckpointData(this) {
+    def batchForTime: mutable.HashMap[Time, SequenceNumberRanges] = {
+      data.asInstanceOf[mutable.HashMap[Time, SequenceNumberRanges]]
+    }
+
+    override def update(time: Time): Unit = {
+      batchForTime.clear()
+      generatedRDDs.foreach { kv =>
+        batchForTime += kv._1 -> kv._2.asInstanceOf[KinesisRDD[T]].seqNumRanges
+      }
+    }
+
+    override def cleanup(time: Time): Unit = { }
+
+    override def restore(): Unit = {
+      batchForTime.toSeq.sortBy(_._1)(Time.ordering).foreach { case (time, seqNumRanges) =>
+        logInfo(s"Restoring KinesisBackedBlockRDD for time $time $seqNumRanges")
+
+        val rdd = new KinesisRDD(
+          context.sc, regionName, endpointUrl, seqNumRanges,
+          messageHandler = messageHandler,
+          kinesisCreds = kinesisCreds)
+
+        generatedRDDs += time -> rdd
+      }
+    }
   }
 }
 
@@ -61,15 +106,12 @@ object KinesisDirectInputDStream {
     // Required params
     private var streamingContext: Option[StreamingContext] = None
     private var streamName: Option[String] = None
+    private var fromSeqNumbers: Option[Map[String, String]] = None
 
     // Params with defaults
     private var endpointUrl: Option[String] = None
     private var regionName: Option[String] = None
-    private var initialPositionInStream: Option[InitialPositionInStream] = None
-    private var storageLevel: Option[StorageLevel] = None
     private var kinesisCredsProvider: Option[SparkAWSCredentials] = None
-    private var dynamoDBCredsProvider: Option[SparkAWSCredentials] = None
-    private var cloudWatchCredsProvider: Option[SparkAWSCredentials] = None
 
     /**
       * Sets the StreamingContext that will be used to construct the Kinesis DStream. This is a
@@ -108,6 +150,18 @@ object KinesisDirectInputDStream {
     }
 
     /**
+      * Sets the point to start reading from the Kinesis stream.  This is a required
+      * parameter.
+      *
+      * @param fromSeqNumbers The shardId and starting seqNumber to begin processing
+      * @return Reference to this [[KinesisDirectInputDStream.Builder]]
+      */
+    def fromSeqNumbers(fromSeqNumbers: Map[String, String]): Builder = {
+      this.fromSeqNumbers = Option(fromSeqNumbers)
+      this
+    }
+
+    /**
       * Sets the AWS Kinesis endpoint URL. Defaults to "https://kinesis.us-east-1.amazonaws.com" if
       * no custom value is specified
       *
@@ -132,31 +186,6 @@ object KinesisDirectInputDStream {
     }
 
     /**
-      * Sets the initial position data is read from in the Kinesis stream. Defaults to
-      * [[InitialPositionInStream.LATEST]] if no custom value is specified.
-      *
-      * @param initialPosition InitialPositionInStream value specifying where Spark Streaming
-      *                        will start reading records in the Kinesis stream from
-      * @return Reference to this [[KinesisDirectInputDStream.Builder]]
-      */
-    def initialPositionInStream(initialPosition: InitialPositionInStream): Builder = {
-      initialPositionInStream = Option(initialPosition)
-      this
-    }
-
-    /**
-      * Sets the storage level of the blocks for the DStream created. Defaults to
-      * [[StorageLevel.MEMORY_AND_DISK_2]] if no custom value is specified.
-      *
-      * @param storageLevel [[StorageLevel]] to use for the DStream data blocks
-      * @return Reference to this [[KinesisDirectInputDStream.Builder]]
-      */
-    def storageLevel(storageLevel: StorageLevel): Builder = {
-      this.storageLevel = Option(storageLevel)
-      this
-    }
-
-    /**
       * Sets the [[SparkAWSCredentials]] to use for authenticating to the AWS Kinesis
       * endpoint. Defaults to [[DefaultCredentialsProvider]] if no custom value is specified.
       *
@@ -164,28 +193,6 @@ object KinesisDirectInputDStream {
       */
     def kinesisCredentials(credentials: SparkAWSCredentials): Builder = {
       kinesisCredsProvider = Option(credentials)
-      this
-    }
-
-    /**
-      * Sets the [[SparkAWSCredentials]] to use for authenticating to the AWS DynamoDB
-      * endpoint. Will use the same credentials used for AWS Kinesis if no custom value is set.
-      *
-      * @param credentials [[SparkAWSCredentials]] to use for DynamoDB authentication
-      */
-    def dynamoDBCredentials(credentials: SparkAWSCredentials): Builder = {
-      dynamoDBCredsProvider = Option(credentials)
-      this
-    }
-
-    /**
-      * Sets the [[SparkAWSCredentials]] to use for authenticating to the AWS CloudWatch
-      * endpoint. Will use the same credentials used for AWS Kinesis if no custom value is set.
-      *
-      * @param credentials [[SparkAWSCredentials]] to use for CloudWatch authentication
-      */
-    def cloudWatchCredentials(credentials: SparkAWSCredentials): Builder = {
-      cloudWatchCredsProvider = Option(credentials)
       this
     }
 
@@ -203,12 +210,9 @@ object KinesisDirectInputDStream {
         getRequiredParam(streamName, "streamName"),
         endpointUrl.getOrElse(DEFAULT_KINESIS_ENDPOINT_URL),
         regionName.getOrElse(DEFAULT_KINESIS_REGION_NAME),
-        initialPositionInStream.getOrElse(DEFAULT_INITIAL_POSITION_IN_STREAM),
-        storageLevel.getOrElse(DEFAULT_STORAGE_LEVEL),
+        getRequiredParam(fromSeqNumbers, "fromSeqNumbers"),
         ssc.sc.clean(handler),
-        kinesisCredsProvider.getOrElse(DefaultCredentials),
-        dynamoDBCredsProvider,
-        cloudWatchCredsProvider)
+        kinesisCredsProvider.getOrElse(DefaultCredentials))
     }
 
     /**
