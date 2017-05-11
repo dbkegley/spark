@@ -28,44 +28,40 @@ import scala.collection.mutable
 import scala.reflect.ClassTag
 
 private[kinesis]
-class KinesisDirectInputDStream[T: ClassTag](_ssc: StreamingContext,
-                                             val streamName: String,
-                                             val endpointUrl: String,
-                                             val regionName: String,
-                                             val fromSeqNumbers: Map[String, String],
-                                             val messageHandler: Record => T,
-                                             val kinesisCreds: SparkAWSCredentials) extends InputDStream[T](_ssc) with Logging {
+class KinesisDirectInputDStream[T: ClassTag](
+    _ssc: StreamingContext,
+    val streamName: String,
+    val endpointUrl: String,
+    val regionName: String,
+    val fromSeqNumbers: Map[String, String],
+    val messageHandler: Record => T,
+    val kinesisCreds: SparkAWSCredentials) extends InputDStream[T](_ssc) with Logging {
+
+  private[streaming] override def name: String = s"Kinesis direct stream [$id]"
+
+  protected[streaming] override val checkpointData =
+    new KinesisDirectInputDStreamCheckpointData
 
   override def start(): Unit = {}
 
   override def stop(): Unit = {}
 
   override def compute(validTime: Time): Option[KinesisRDD[T]] = {
-
-    // todo: describe streams
-
-    // todo: calculate seqNum ranges
-
-//    val seqNumRanges = fromSeqNumbers.map { case (shardId, seqNum) =>
-//        seqNum
-//    }
-    val seqNumRanges = SequenceNumberRanges(Seq(SequenceNumberRange("", "", "", "", 0)))
-
-     val rdd = new KinesisRDD(
-       context.sc,
-       endpointUrl,
-       regionName,
-       seqNumRanges,
-       messageHandler,
-       kinesisCreds)
-
-    Some(rdd)
+    Some(new KinesisRDD(
+      context.sc,
+      streamName,
+      endpointUrl,
+      regionName,
+      fromSeqNumbers,
+      validTime.milliseconds,
+      messageHandler,
+      kinesisCreds))
   }
 
   private[streaming]
   class KinesisDirectInputDStreamCheckpointData extends DStreamCheckpointData(this) {
-    def batchForTime: mutable.HashMap[Time, SequenceNumberRanges] = {
-      data.asInstanceOf[mutable.HashMap[Time, SequenceNumberRanges]]
+    def batchForTime: mutable.HashMap[Time, DirectSequenceNumberRanges] = {
+      data.asInstanceOf[mutable.HashMap[Time, DirectSequenceNumberRanges]]
     }
 
     override def update(time: Time): Unit = {
@@ -79,12 +75,17 @@ class KinesisDirectInputDStream[T: ClassTag](_ssc: StreamingContext,
 
     override def restore(): Unit = {
       batchForTime.toSeq.sortBy(_._1)(Time.ordering).foreach { case (time, seqNumRanges) =>
-        logInfo(s"Restoring KinesisBackedBlockRDD for time $time $seqNumRanges")
+        logInfo(s"Restoring KinesiskRDD for time $time $seqNumRanges")
 
         val rdd = new KinesisRDD(
-          context.sc, regionName, endpointUrl, seqNumRanges,
-          messageHandler = messageHandler,
-          kinesisCreds = kinesisCreds)
+          context.sc,
+          streamName,
+          endpointUrl,
+          regionName,
+          fromSeqNumbers,
+          time.milliseconds,
+          messageHandler,
+          kinesisCreds)
 
         generatedRDDs += time -> rdd
       }

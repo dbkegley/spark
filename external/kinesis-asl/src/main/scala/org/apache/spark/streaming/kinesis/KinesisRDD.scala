@@ -17,26 +17,32 @@
 
 package org.apache.spark.streaming.kinesis
 
-import com.amazonaws.services.kinesis.model.Record
+import com.amazonaws.services.kinesis.model._
 import org.apache.spark.{Partition, SparkContext, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 
 private[kinesis]
-class KinesisRDD[T](sc: SparkContext,
-                    val endpointUrl: String,
-                    val regionName: String,
-                    val seqNumRanges: SequenceNumberRanges,
-                    val messageHandler: Record => T,
-                    val kinesisCreds: SparkAWSCredentials) extends RDD[T](sc, Nil) with Logging {
+class KinesisRDD[T](
+    sc: SparkContext,
+    val streamName: String,
+    val endpointUrl: String,
+    val regionName: String,
+    val fromSeqNumbers: Map[String, String],
+    val validTime: Long,
+    val messageHandler: Record => T,
+    val kinesisCreds: SparkAWSCredentials) extends RDD[T](sc, Nil) with HasSeqNumRanges with Logging {
+
+
+  val seqNumRanges : DirectSequenceNumberRanges = getToSeqNumbers(validTime)
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
-    new KinesisSequenceRangeIterator(
+    new KinesisRDDPartitionIterator(
       kinesisCreds.provider.getCredentials,
       endpointUrl,
       regionName,
       split.asInstanceOf[KinesisRDDPartition].seqNumberRange,
-      1)
+      10000)
       .map(messageHandler)
   }
 
@@ -45,14 +51,23 @@ class KinesisRDD[T](sc: SparkContext,
       new KinesisRDDPartition(i, range)
     }.toArray
   }
+
+  private def getToSeqNumbers(batchTime: Long): DirectSequenceNumberRanges = {
+
+    // init kinesis client
+
+    DirectSequenceNumberRanges(fromSeqNumbers.map { case (shardId, fromSeqNumber) =>
+      val toSeqNumber = "10" // client.getMessages(1, AT_TIMESTAMP).next().sequenceNumber
+      DirectSequenceNumberRange(streamName, shardId, fromSeqNumber, toSeqNumber)
+    }.toSeq)
+  }
 }
 
 /** Partition storing the information of the ranges of Kinesis sequence numbers to read */
 private[kinesis]
-class KinesisRDDPartition(val index: Int, val seqNumberRange: SequenceNumberRange) extends Partition {
+class KinesisRDDPartition(val index: Int, val seqNumberRange: DirectSequenceNumberRange) extends Partition {
 
-  /** Number of messages this partition refers to */
-  def count(): Long = seqNumberRange.recordCount
+  // todo: where to get count without reading from kinesis
+  //def count(): Long = seqNumberRange.recordCount
 
 }
-
