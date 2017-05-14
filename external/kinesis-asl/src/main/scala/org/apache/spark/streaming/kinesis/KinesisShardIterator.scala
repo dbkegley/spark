@@ -44,7 +44,7 @@ case class DirectSequenceNumberRanges(ranges: Seq[DirectSequenceNumberRange]) {
   override def toString(): String = ranges.mkString("DirectSequenceNumberRanges(", ", ", ")")
 }
 
-trait HasSeqNumRanges {
+trait HasSequenceNumberRanges {
   def seqNumRanges: DirectSequenceNumberRanges
 }
 
@@ -56,7 +56,7 @@ trait HasSeqNumRanges {
   * until toSequenceNumber from a single shard
   */
 private[kinesis]
-class KinesisRDDPartitionIterator(credentials: AWSCredentials,
+class KinesisShardIterator(credentials: AWSCredentials,
                                   endpointUrl: String,
                                   regionId: String,
                                   range: DirectSequenceNumberRange,
