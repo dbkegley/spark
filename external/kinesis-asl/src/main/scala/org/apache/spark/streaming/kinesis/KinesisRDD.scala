@@ -28,16 +28,13 @@ class KinesisRDD[T](
     val streamName: String,
     val endpointUrl: String,
     val regionName: String,
-    val fromSeqNumbers: Map[String, String],
+    val seqNumRanges: DirectSequenceNumberRanges,
     val validTime: Long,
     val messageHandler: Record => T,
-    val kinesisCreds: SparkAWSCredentials) extends RDD[T](sc, Nil) with HasSeqNumRanges with Logging {
-
-
-  val seqNumRanges : DirectSequenceNumberRanges = getToSeqNumbers(validTime)
+    val kinesisCreds: SparkAWSCredentials) extends RDD[T](sc, Nil) with Logging {
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
-    new KinesisRDDPartitionIterator(
+    new KinesisShardIterator(
       kinesisCreds.provider.getCredentials,
       endpointUrl,
       regionName,
@@ -51,10 +48,38 @@ class KinesisRDD[T](
       new KinesisRDDPartition(i, range)
     }.toArray
   }
+}
 
-  private def getToSeqNumbers(batchTime: Long): DirectSequenceNumberRanges = {
+private [kinesis]
+object KinesisRDD {
+
+  def apply[T](
+    sc: SparkContext,
+    streamName: String,
+    endpointUrl: String,
+    regionName: String,
+    fromSeqNumbers: Map[String, String],
+    batchTime: Long,
+    messageHandler: Record => T,
+    kinesisCreds: SparkAWSCredentials): KinesisRDD[T] = {
+
+    val ranges = getSequenceNumberRanges(streamName, fromSeqNumbers, batchTime)
+
+    new KinesisRDD(
+      sc,
+      streamName,
+      endpointUrl,
+      regionName,
+      ranges,
+      batchTime,
+      messageHandler,
+      kinesisCreds)
+  }
+
+  private def getSequenceNumberRanges(streamName: String, fromSeqNumbers: Map[String, String], batchTime: Long): DirectSequenceNumberRanges = {
 
     // init kinesis client
+    // todo: impl
 
     DirectSequenceNumberRanges(fromSeqNumbers.map { case (shardId, fromSeqNumber) =>
       val toSeqNumber = "10" // client.getMessages(1, AT_TIMESTAMP).next().sequenceNumber
