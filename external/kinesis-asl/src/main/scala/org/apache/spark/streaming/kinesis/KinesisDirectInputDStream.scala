@@ -47,15 +47,8 @@ class KinesisDirectInputDStream[T: ClassTag](
   override def stop(): Unit = {}
 
   override def compute(validTime: Time): Option[KinesisRDD[T]] = {
-    Some(KinesisRDD(
-      context.sc,
-      streamName,
-      endpointUrl,
-      regionName,
-      fromSeqNumbers,
-      validTime.milliseconds,
-      messageHandler,
-      kinesisCreds))
+    Some(KinesisRDD(context.sc, streamName, endpointUrl, regionName, fromSeqNumbers, validTime.milliseconds,
+      messageHandler, kinesisCreds))
   }
 
   private[streaming]
@@ -77,15 +70,8 @@ class KinesisDirectInputDStream[T: ClassTag](
       batchForTime.toSeq.sortBy(_._1)(Time.ordering).foreach { case (time, seqNumRanges) =>
         logInfo(s"Restoring KinesiskRDD for time $time $seqNumRanges")
 
-        val rdd = new KinesisRDD(
-          context.sc,
-          streamName,
-          endpointUrl,
-          regionName,
-          seqNumRanges,
-          time.milliseconds,
-          messageHandler,
-          kinesisCreds)
+        val rdd = new KinesisRDD(context.sc, streamName, endpointUrl, regionName, seqNumRanges,
+          time.milliseconds, messageHandler, kinesisCreds)
 
         generatedRDDs += time -> rdd
       }
