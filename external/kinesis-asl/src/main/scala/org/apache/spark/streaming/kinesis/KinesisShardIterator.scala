@@ -29,10 +29,11 @@ import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
 
 private[kinesis]
-case class DirectSequenceNumberRange(streamName: String,
-                                     shardId: String,
-                                     fromSeqNumber: String,
-                                     toSeqNumber: String)
+case class DirectSequenceNumberRange(
+  streamName: String,
+  shardId: String,
+  fromSeqNumber: String,
+  toSeqNumber: String)
 
 /** Class representing an array of Kinesis sequence number ranges */
 private[kinesis]
@@ -56,11 +57,12 @@ trait HasSequenceNumberRanges {
   * until toSequenceNumber from a single shard
   */
 private[kinesis]
-class KinesisShardIterator(credentials: AWSCredentials,
-                                  endpointUrl: String,
-                                  regionId: String,
-                                  range: DirectSequenceNumberRange,
-                                  retryTimeoutMs: Int) extends NextIterator[Record] with Logging {
+class KinesisShardIterator(
+  credentials: AWSCredentials,
+  endpointUrl: String,
+  regionId: String,
+  range: DirectSequenceNumberRange,
+  retryTimeoutMs: Int) extends NextIterator[Record] with Logging {
 
   private val client = new AmazonKinesisClient(credentials)
   private val streamName = range.streamName
@@ -124,8 +126,8 @@ class KinesisShardIterator(credentials: AWSCredentials,
     * Get records starting from or after the given sequence number.
     */
   private def getRecords(iteratorType: ShardIteratorType,
-                         seqNum: String,
-                         recordCount: Int): Iterator[Record] = {
+    seqNum: String,
+    recordCount: Int): Iterator[Record] = {
 
     val shardIterator = getKinesisIterator(iteratorType, seqNum)
     val result = getRecordsAndNextKinesisIterator(shardIterator)
@@ -162,7 +164,7 @@ class KinesisShardIterator(credentials: AWSCredentials,
     * sequence number.
     */
   private def getKinesisIterator(iteratorType: ShardIteratorType,
-                                 sequenceNumber: String): String = {
+    sequenceNumber: String): String = {
 
     val getShardIteratorRequest = new GetShardIteratorRequest
     getShardIteratorRequest.setRequestCredentials(credentials)

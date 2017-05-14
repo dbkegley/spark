@@ -47,7 +47,7 @@ class KinesisDirectInputDStream[T: ClassTag](
   override def stop(): Unit = {}
 
   override def compute(validTime: Time): Option[KinesisRDD[T]] = {
-    Some(new KinesisRDD(
+    Some(KinesisRDD(
       context.sc,
       streamName,
       endpointUrl,
@@ -82,7 +82,7 @@ class KinesisDirectInputDStream[T: ClassTag](
           streamName,
           endpointUrl,
           regionName,
-          fromSeqNumbers,
+          seqNumRanges,
           time.milliseconds,
           messageHandler,
           kinesisCreds)
