@@ -92,7 +92,7 @@ object KinesisRDD {
 private[kinesis]
 class KinesisRDDPartition(val index: Int, val seqNumberRange: DirectSequenceNumberRange) extends Partition {
 
-  // todo: where to get count without reading from kinesis
+  // todo: possible to get count without reading from kinesis the first time?
   //def count(): Long = seqNumberRange.recordCount
 
 }

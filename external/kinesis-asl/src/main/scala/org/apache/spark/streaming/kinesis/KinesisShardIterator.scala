@@ -45,10 +45,6 @@ case class DirectSequenceNumberRanges(ranges: Seq[DirectSequenceNumberRange]) {
   override def toString(): String = ranges.mkString("DirectSequenceNumberRanges(", ", ", ")")
 }
 
-trait HasSequenceNumberRanges {
-  def seqNumRanges: DirectSequenceNumberRanges
-}
-
 // todo: Expose shardId and subsequence number of Record/UserRecord
 
 /**
