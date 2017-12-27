@@ -17,21 +17,24 @@
 
 package org.apache.spark.streaming.kinesis
 
+import com.amazonaws.auth.AWSCredentials
 import com.amazonaws.services.kinesis.model._
 import org.apache.spark.{Partition, SparkContext, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 
+import scala.reflect.ClassTag
+
 private[kinesis]
-class KinesisRDD[T](
+class KinesisRDD[T: ClassTag](
     sc: SparkContext,
     val streamName: String,
     val endpointUrl: String,
     val regionName: String,
     val seqNumRanges: DirectSequenceNumberRanges,
-    val validTime: Long,
     val messageHandler: Record => T,
-    val kinesisCreds: SparkAWSCredentials) extends RDD[T](sc, Nil) with Logging {
+    val kinesisCreds: SparkAWSCredentials,
+    val cloudWatchCreds: Option[SparkAWSCredentials]) extends RDD[T](sc, Nil) with Logging {
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
     new KinesisShardIterator(
@@ -43,7 +46,7 @@ class KinesisRDD[T](
       .map(messageHandler)
   }
 
-  override protected def getPartitions: Array[KinesisRDDPartition] = {
+  override protected def getPartitions: Array[Partition] = {
     seqNumRanges.ranges.zipWithIndex.map { case (range, i) =>
       new KinesisRDDPartition(i, range)
     }.toArray
@@ -53,7 +56,7 @@ class KinesisRDD[T](
 private [kinesis]
 object KinesisRDD {
 
-  def apply[T](
+  def apply[T: ClassTag](
     sc: SparkContext,
     streamName: String,
     endpointUrl: String,
@@ -61,38 +64,40 @@ object KinesisRDD {
     fromSeqNumbers: Map[String, String],
     batchTime: Long,
     messageHandler: Record => T,
-    kinesisCreds: SparkAWSCredentials): KinesisRDD[T] = {
+    kinesisCreds: SparkAWSCredentials,
+    cloudWatchCreds: Option[SparkAWSCredentials]): KinesisRDD[T] = {
 
-    val ranges = getSequenceNumberRanges(streamName, fromSeqNumbers, batchTime)
+    val credentials = kinesisCreds.provider.getCredentials
+    val ranges = getInitialDirectSequenceNumberRanges(streamName, endpointUrl, fromSeqNumbers, batchTime, credentials)
 
-    new KinesisRDD(
-      sc,
-      streamName,
-      endpointUrl,
-      regionName,
-      ranges,
-      batchTime,
-      messageHandler,
-      kinesisCreds)
+    new KinesisRDD[T](sc, streamName, endpointUrl, regionName, ranges, messageHandler, kinesisCreds, cloudWatchCreds)
   }
 
-  private def getSequenceNumberRanges(streamName: String, fromSeqNumbers: Map[String, String], batchTime: Long): DirectSequenceNumberRanges = {
-
-    // init kinesis client
-    // todo: impl
+  private def getInitialDirectSequenceNumberRanges(
+    streamName: String,
+    endpointUrl: String,
+    fromSeqNumbers: Map[String, String],
+    batchTime: Long,
+    credentials: AWSCredentials): DirectSequenceNumberRanges = {
 
     DirectSequenceNumberRanges(fromSeqNumbers.map { case (shardId, fromSeqNumber) =>
-      val toSeqNumber = "10" // client.getMessages(1, AT_TIMESTAMP).next().sequenceNumber
-      DirectSequenceNumberRange(streamName, shardId, fromSeqNumber, toSeqNumber)
+      DirectSequenceNumberRange(streamName, shardId, fromSeqNumber, batchTime, None, None)
     }.toSeq)
   }
 }
 
-/** Partition storing the information of the ranges of Kinesis sequence numbers to read */
 private[kinesis]
 class KinesisRDDPartition(val index: Int, val seqNumberRange: DirectSequenceNumberRange) extends Partition {
 
-  // todo: possible to get count without reading from kinesis the first time?
-  //def count(): Long = seqNumberRange.recordCount
+   def count(): Long = {
+     seqNumberRange.count match {
+       case Some(count) => count
+       case None => {
+         // retrieve the count by creating a new iterator
+         // new KinesisShardIterator().count
+         0
+       }
+     }
+   }
 
 }

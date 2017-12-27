@@ -27,15 +27,16 @@ import org.apache.spark.streaming.dstream.{DStreamCheckpointData, InputDStream}
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
-private[kinesis]
-class KinesisDirectInputDStream[T: ClassTag](
+private[kinesis] class KinesisDirectInputDStream[T: ClassTag](
     _ssc: StreamingContext,
     val streamName: String,
     val endpointUrl: String,
     val regionName: String,
     val fromSeqNumbers: Map[String, String],
     val messageHandler: Record => T,
-    val kinesisCreds: SparkAWSCredentials) extends InputDStream[T](_ssc) with Logging {
+    val kinesisCreds: SparkAWSCredentials,
+    val cloudWatchCreds: Option[SparkAWSCredentials]
+) extends InputDStream[T](_ssc) with Logging {
 
   private[streaming] override def name: String = s"Kinesis direct stream [$id]"
 
@@ -48,7 +49,7 @@ class KinesisDirectInputDStream[T: ClassTag](
 
   override def compute(validTime: Time): Option[KinesisRDD[T]] = {
     Some(KinesisRDD(context.sc, streamName, endpointUrl, regionName, fromSeqNumbers, validTime.milliseconds,
-      messageHandler, kinesisCreds))
+      messageHandler, kinesisCreds, cloudWatchCreds))
   }
 
   private[streaming]
@@ -70,9 +71,8 @@ class KinesisDirectInputDStream[T: ClassTag](
       batchForTime.toSeq.sortBy(_._1)(Time.ordering).foreach { case (time, seqNumRanges) =>
         logInfo(s"Restoring KinesiskRDD for time $time $seqNumRanges")
 
-        val rdd = new KinesisRDD(context.sc, streamName, endpointUrl, regionName, seqNumRanges,
-          time.milliseconds, messageHandler, kinesisCreds)
-
+        val rdd : KinesisRDD[T] = new KinesisRDD(context.sc, streamName, endpointUrl, regionName,
+          seqNumRanges, messageHandler, kinesisCreds, cloudWatchCreds)
         generatedRDDs += time -> rdd
       }
     }
@@ -97,6 +97,7 @@ object KinesisDirectInputDStream {
     private var endpointUrl: Option[String] = None
     private var regionName: Option[String] = None
     private var kinesisCredsProvider: Option[SparkAWSCredentials] = None
+    private var cloudWatchCredsProvider: Option[SparkAWSCredentials] = None
 
     /**
       * Sets the StreamingContext that will be used to construct the Kinesis DStream. This is a
@@ -182,6 +183,17 @@ object KinesisDirectInputDStream {
     }
 
     /**
+      * Sets the [[SparkAWSCredentials]] to use for authenticating to the AWS CloudWatch
+      * endpoint. Will use the same credentials used for AWS Kinesis if no custom value is set.
+      *
+      * @param credentials [[SparkAWSCredentials]] to use for CloudWatch authentication
+      */
+    def cloudWatchCredentials(credentials: SparkAWSCredentials): Builder = {
+      cloudWatchCredsProvider = Option(credentials)
+      this
+    }
+
+    /**
       * Create a new instance of [[KinesisDirectInputDStream]] with configured parameters and the provided
       * message handler.
       *
@@ -197,7 +209,8 @@ object KinesisDirectInputDStream {
         regionName.getOrElse(DEFAULT_KINESIS_REGION_NAME),
         getRequiredParam(fromSeqNumbers, "fromSeqNumbers"),
         ssc.sc.clean(handler),
-        kinesisCredsProvider.getOrElse(DefaultCredentials))
+        kinesisCredsProvider.getOrElse(DefaultCredentials),
+        cloudWatchCredsProvider)
     }
 
     /**
@@ -231,6 +244,5 @@ object KinesisDirectInputDStream {
   }
 
   private[kinesis] val DEFAULT_KINESIS_REGION_NAME: String = "us-east-1"
-  private[kinesis] val DEFAULT_KINESIS_ENDPOINT_URL: String =
-    "https://kinesis.us-east-1.amazonaws.com"
+  private[kinesis] val DEFAULT_KINESIS_ENDPOINT_URL: String = "https://kinesis.us-east-1.amazonaws.com"
 }

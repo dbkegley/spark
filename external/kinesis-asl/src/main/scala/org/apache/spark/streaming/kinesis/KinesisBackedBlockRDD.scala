@@ -115,6 +115,7 @@ class KinesisBackedBlockRDD[T: ClassTag](
           range, kinesisReadConfigs).map(messageHandler)
       }
     }
+
     if (partition.isBlockIdValid) {
       getBlockFromBlockManager().getOrElse { getBlockFromKinesis() }
     } else {
