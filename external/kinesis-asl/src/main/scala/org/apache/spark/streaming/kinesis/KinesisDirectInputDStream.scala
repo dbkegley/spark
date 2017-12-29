@@ -24,8 +24,11 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.dstream.{DStreamCheckpointData, InputDStream}
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable
+
 import scala.reflect.ClassTag
+
 
 private[kinesis] class KinesisDirectInputDStream[T: ClassTag](
     _ssc: StreamingContext,
@@ -144,6 +147,20 @@ object KinesisDirectInputDStream {
       */
     def fromSeqNumbers(fromSeqNumbers: Map[String, String]): Builder = {
       this.fromSeqNumbers = Option(fromSeqNumbers)
+      this
+    }
+
+    /**
+      * Sets the point to start reading from the Kinesis stream.  This is a required
+      * parameter.
+      *
+      * Overloaded method for java compatibility
+      *
+      * @param fromSeqNumbers The shardId and starting seqNumber to begin processing
+      * @return Reference to this [[KinesisDirectInputDStream.Builder]]
+      */
+    def fromSeqNumbers(fromSeqNumbers: java.util.Map[String, String]): Builder = {
+      this.fromSeqNumbers = Option(fromSeqNumbers.asScala.toMap)
       this
     }
 

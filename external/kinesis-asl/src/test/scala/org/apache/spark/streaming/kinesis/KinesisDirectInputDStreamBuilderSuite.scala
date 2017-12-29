@@ -17,25 +17,31 @@
 
 package org.apache.spark.streaming.kinesis
 
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.mockito.MockitoSugar
 
-import org.apache.spark.storage.StorageLevel
-import org.apache.spark.streaming.{Seconds, StreamingContext, TestSuiteBase}
+import org.apache.spark.streaming.{StreamingContext, TestSuiteBase}
 
-class KinesisDirectInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterEach
-  with MockitoSugar {
+class KinesisDirectInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterEach with MockitoSugar {
   import KinesisDirectInputDStream._
 
-  private val ssc = new StreamingContext(conf, batchDuration)
   private val streamName = "a-very-nice-kinesis-stream-name"
+  private val fromSeqNumbers = Map("shard1" -> "000")
+
+  private var ssc: StreamingContext = null
   private def baseBuilder = KinesisDirectInputDStream.builder
-  private def builder = baseBuilder.streamingContext(ssc)
+  private def builder = baseBuilder
+    .streamingContext(ssc)
     .streamName(streamName)
+    .fromSeqNumbers(fromSeqNumbers)
+
+  override def beforeAll(): Unit = {
+    ssc = new StreamingContext(conf, batchDuration)
+  }
 
   override def afterAll(): Unit = {
     ssc.stop()
+    super.afterAll()
   }
 
   test("should raise an exception if the StreamingContext is missing") {
@@ -44,9 +50,17 @@ class KinesisDirectInputDStreamBuilderSuite extends TestSuiteBase with BeforeAnd
     }
   }
 
-  test("should raise an exception if the stream name is missing") {
+  test("should raise an exception if the streamName is missing") {
     intercept[IllegalArgumentException] {
       baseBuilder.streamingContext(ssc).build()
+    }
+  }
+
+  test("should raise an exception if fromSeqNumbers is missing") {
+    intercept[IllegalArgumentException] {
+      baseBuilder.streamName(streamName)
+        .streamingContext(ssc)
+        .build()
     }
   }
 
@@ -54,6 +68,7 @@ class KinesisDirectInputDStreamBuilderSuite extends TestSuiteBase with BeforeAnd
     val dstream = builder.build()
     assert(dstream.context == ssc)
     assert(dstream.streamName == streamName)
+    assert(dstream.fromSeqNumbers == fromSeqNumbers)
   }
 
   test("should propagate default values to KinesisDirectInputDStream") {
@@ -61,28 +76,27 @@ class KinesisDirectInputDStreamBuilderSuite extends TestSuiteBase with BeforeAnd
     assert(dstream.endpointUrl == DEFAULT_KINESIS_ENDPOINT_URL)
     assert(dstream.regionName == DEFAULT_KINESIS_REGION_NAME)
     assert(dstream.kinesisCreds == DefaultCredentials)
-    assert(dstream.cloudWatchCreds == None)
+    assert(dstream.cloudWatchCreds.isEmpty)
   }
 
-  test("should propagate custom non-auth values to KinesisInputDStream") {
+  test("should propagate custom non-auth values to KinesisDirectInputDStream") {
     val customEndpointUrl = "https://kinesis.us-west-2.amazonaws.com"
     val customRegion = "us-west-2"
-    val customInitialPosition = InitialPositionInStream.TRIM_HORIZON
-    val customAppName = "a-very-nice-kinesis-app"
-    val customCheckpointInterval = Seconds(30)
-    val customStorageLevel = StorageLevel.MEMORY_ONLY
+    val customFromSeqNumbers = Map("a" -> "0")
     val customKinesisCreds = mock[SparkAWSCredentials]
-    val customDynamoDBCreds = mock[SparkAWSCredentials]
     val customCloudWatchCreds = mock[SparkAWSCredentials]
 
     val dstream = builder
       .endpointUrl(customEndpointUrl)
       .regionName(customRegion)
+      .fromSeqNumbers(customFromSeqNumbers)
       .kinesisCredentials(customKinesisCreds)
       .cloudWatchCredentials(customCloudWatchCreds)
       .build()
+
     assert(dstream.endpointUrl == customEndpointUrl)
     assert(dstream.regionName == customRegion)
+    assert(dstream.fromSeqNumbers == customFromSeqNumbers)
     assert(dstream.kinesisCreds == customKinesisCreds)
     assert(dstream.cloudWatchCreds == Option(customCloudWatchCreds))
   }

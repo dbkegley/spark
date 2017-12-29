@@ -28,16 +28,23 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
    with MockitoSugar {
   import KinesisInputDStream._
 
-  private val ssc = new StreamingContext(conf, batchDuration)
   private val streamName = "a-very-nice-kinesis-stream-name"
   private val checkpointAppName = "a-very-nice-kcl-app-name"
+
+  private var ssc: StreamingContext = null
   private def baseBuilder = KinesisInputDStream.builder
-  private def builder = baseBuilder.streamingContext(ssc)
+  private def builder = baseBuilder
+    .streamingContext(ssc)
     .streamName(streamName)
     .checkpointAppName(checkpointAppName)
 
+  override def beforeAll(): Unit = {
+    ssc = new StreamingContext(conf, batchDuration)
+  }
+
   override def afterAll(): Unit = {
     ssc.stop()
+    super.afterAll()
   }
 
   test("should raise an exception if the StreamingContext is missing") {
